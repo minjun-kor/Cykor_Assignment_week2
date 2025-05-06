@@ -5,7 +5,7 @@
 #include <limits.h>
 
 int main() {
-    char command[256];
+    char command[1024];
 
     while (1) {
         char cwd[256];
