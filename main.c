@@ -48,6 +48,35 @@ void other_commands(char *command) {
     }
 }
 
+void pipe(char *command) {
+    char *input1 = strtok(command, "|");
+    char *input2 = strtok(NULL, "|");
+
+    if (input1 == NULL || input2 == NULL) {
+        fprintf(stderr, "파이프 명령어 형식 오류\n");
+        return;
+    }
+
+    char *args1[100], *args2[100];
+    int i = 0;
+    char *token = strtok(input1, " ");
+    while (token != NULL) {
+        args1[i++] = token;
+        token = strtok(NULL, " ");
+    }
+    args1[i] = NULL;
+
+    i = 0;
+    token = strtok(input2, " ");
+    while (token != NULL) {
+        args2[i++] = token;
+        token = strtok(NULL, " ");
+    }
+    args2[i] = NULL;
+
+}
+
+
 int main() {
     char command[1000];
 
@@ -68,6 +97,9 @@ int main() {
         }
         else if (strcmp(command, "pwd") == 0) {
             pwd();
+        }
+        else if (strchr(command, '|') != NULL) {
+            pipe(command);
         }
         else {
             other_commands(command);
