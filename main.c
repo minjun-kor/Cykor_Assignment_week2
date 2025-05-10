@@ -5,18 +5,34 @@
 #include <limits.h>
 #include <sys/wait.h>
 
+char *remove_whitespace(char *str) {
+    while (*str == ' ' || *str == '\t' || *str == '\n') {
+        str++;
+    }
+
+    char *end = str + strlen(str) - 1;
+
+    while (end > str && (*end == ' ' || *end == '\t' || *end == '\n')) {
+        *end = '\0';
+        end--;
+    }
+    return str;
+}
+
 void split_args(char *input, char **args) {
     int i = 0;
     char *token = strtok(input, " ");
+
     while (token != NULL && i < 99) {
-        args[i++] = token;
+        args[i++] = remove_whitespace(token);
         token = strtok(NULL, " ");
     }
     args[i] = NULL;
 }
 
-void cd(char* path){
+void cd(char* path) {
     path += 3;
+    path = remove_whitespace(path);
     if (chdir(path) != 0) {
         perror("cd 오류");
     }
@@ -26,73 +42,132 @@ void pwd() {
     char cwd[100];
     if (getcwd(cwd, sizeof(cwd))) {
         printf("%s\n", cwd);
-    } 
-    else {
+    } else {
         perror("pwd 오류");
     }
 }
 
-void other_commands(char *command) {
+void multi_pipe(char *command) {
+    char *cmds[10];
+    int num = 0;
+
+    char *token = strtok(command, "|");
+    while (token != NULL && num < 10) {
+        token = remove_whitespace(token);
+        if (strlen(token) > 0) {
+            cmds[num++] = token;
+        }
+        token = strtok(NULL, "|");
+    }
+
+    int prev_fd = -1;
+
+    for (int i = 0; i < num; i++) {
+        char *args[100];
+        split_args(cmds[i], args);
+
+        int pipe_fd[2];
+        if (i < num - 1 && pipe(pipe_fd) < 0) {
+            perror("pipe 실패");
+            exit(1);
+        }
+
+        pid_t pid = fork();
+        if (pid == 0) {
+            if (prev_fd != -1) {
+                dup2(prev_fd, 0);
+                close(prev_fd);
+            }
+            if (i < num - 1) {
+                close(pipe_fd[0]);
+                dup2(pipe_fd[1], 1);
+                close(pipe_fd[1]);
+            }
+
+            execvp(args[0], args);
+            perror("명령 실행 실패");
+            exit(1);
+        } 
+        else {
+            if (prev_fd != -1) {
+                close(prev_fd);
+            }
+            if (i < num - 1) {
+                close(pipe_fd[1]);
+                prev_fd = pipe_fd[0];
+            }
+            waitpid(pid, NULL, 0);
+        }
+    }
+}
+
+int single_command(char *command) {
+    if (strcmp(command, "exit") == 0){
+        exit(0);
+    }
+    if (strncmp(command, "cd ", 3) == 0) {
+        cd(command);
+        return 0;
+    }
+    if (strcmp(command, "pwd") == 0) {
+        pwd();
+        return 0;
+    }
+    if (strchr(command, '|')) {
+        multi_pipe(command);
+        return 0;
+    }
+
     char *args[100];
     split_args(command, args);
-
     pid_t pid = fork();
-    if (pid < 0) {
-        perror("fork 실패");
-    } 
-    else if (pid == 0) {
+    if (pid == 0) {
         execvp(args[0], args);
-        perror("명령 실행 실패");
+        perror("실행 실패");
         exit(1);
     } 
     else {
-        waitpid(pid, NULL, 0);
+        int status;
+        waitpid(pid, &status, 0);
+        return WEXITSTATUS(status);  
     }
 }
 
-void one_pipe(char *command) {
-    char *input1 = strtok(command, "|");
-    char *input2 = strtok(NULL, "|");
 
-    if (input1 == NULL || input2 == NULL) {
-        fprintf(stderr, "파이프 명령어 형식 오류\n");
-        return;
+void logical_command(char *logic) {
+    char *curr = logic;
+    char *next;
+    int run_next = 1;
+    int last = 0;
+
+    while (curr != NULL && *curr != '\0') {
+        if ((next = strstr(curr, "&&")) != NULL) {
+            *next = '\0';
+            next += 2;
+            run_next = (last == 0);
+        } 
+        else if ((next = strstr(curr, "||")) != NULL) {
+            *next = '\0';
+            next += 2;
+            run_next = (last != 0);
+        } 
+        else if ((next = strchr(curr, ';')) != NULL) {
+            *next = '\0';
+            next += 1;
+            run_next = 1;
+        } 
+        else {
+            next = NULL;
+        }
+
+        char *processed_command = remove_whitespace(curr);
+        if (run_next && strlen(processed_command) > 0) {
+            last = single_command(processed_command);
+        }
+
+        curr = next;
     }
-
-    char *args1[100], *args2[100];
-    split_args(input1, args1);
-    split_args(input2, args2);
-
-    int fd[2];
-    pipe(fd);
-
-    pid_t pid1 = fork();
-    if (pid1 == 0) {
-        dup2(fd[1], STDOUT_FILENO);
-        close(fd[0]);
-        close(fd[1]);
-        execvp(args1[0], args1);
-        perror("파이프 왼쪽 실행 실패");
-        exit(1);
-    }
-
-    pid_t pid2 = fork();
-    if (pid2 == 0) {
-        dup2(fd[0], STDIN_FILENO);
-        close(fd[1]);
-        close(fd[0]);
-        execvp(args2[0], args2);
-        perror("파이프 오른쪽 실행 실패");
-        exit(1);
-    }
-
-    close(fd[0]);
-    close(fd[1]);
-    waitpid(pid1, NULL, 0);
-    waitpid(pid2, NULL, 0);
-
 }
-
 
 int main() {
     char command[100];
@@ -103,24 +178,13 @@ int main() {
         printf("%s$ ", cwd);
         fflush(stdout);
 
-        fgets(command, sizeof(command), stdin);
-        command[strcspn(command, "\n")] = 0;
-
-        if (strcmp(command, "exit") == 0) {
+        if (!fgets(command, sizeof(command), stdin)) {
             break;
         }
-        else if (strncmp(command, "cd ", 3) == 0) {
-            cd(command);
-        }
-        else if (strcmp(command, "pwd") == 0) {
-            pwd();
-        }
-        else if (strchr(command, '|') != NULL) {
-            one_pipe(command);
-        }
-        else {
-            other_commands(command);
-        }
+
+        command[strcspn(command, "\n")] = 0;
+
+        logical_command(command);
     }
 
     return 0;
