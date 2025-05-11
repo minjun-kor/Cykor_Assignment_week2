@@ -4,6 +4,21 @@
 #include <unistd.h>
 #include <limits.h>
 #include <sys/wait.h>
+#include <signal.h>
+#include <errno.h>
+
+void background(int check) {
+    int saved_errno = errno;
+    pid_t pid;
+    int status;
+
+    while ((pid = waitpid(-1, &status, WNOHANG)) > 0) {
+        printf("[백그라운드 종료] pid: %d\n", pid);
+        fflush(stdout);
+    }
+
+    errno = saved_errno;
+}
 
 char *remove_whitespace(char *str) {
     while (*str == ' ' || *str == '\t' || *str == '\n') {
@@ -30,20 +45,24 @@ void split_args(char *input, char **args) {
     args[i] = NULL;
 }
 
-void cd(char* path) {
+int cd(char* path) {
     path += 3;
     path = remove_whitespace(path);
     if (chdir(path) != 0) {
         perror("cd 오류");
+        return 1;
     }
+    return 0;
 }
 
-void pwd() {
+int pwd() {
     char cwd[100];
     if (getcwd(cwd, sizeof(cwd))) {
         printf("%s\n", cwd);
+        return 0;
     } else {
         perror("pwd 오류");
+        return 1;
     }
 }
 
@@ -102,16 +121,24 @@ void multi_pipe(char *command) {
 }
 
 int single_command(char *command) {
-    if (strcmp(command, "exit") == 0){
+    command = remove_whitespace(command);
+
+    int background = 0;
+    size_t len = strlen(command);
+    if (len > 0 && command[len - 1] == '&') {
+        background = 1;
+        command[len - 1] = '\0';  
+        command = remove_whitespace(command);
+    }
+
+    if (strcmp(command, "exit") == 0) {
         exit(0);
     }
     if (strncmp(command, "cd ", 3) == 0) {
-        cd(command);
-        return 0;
+        return cd(command);
     }
     if (strcmp(command, "pwd") == 0) {
-        pwd();
-        return 0;
+        return pwd();
     }
     if (strchr(command, '|')) {
         multi_pipe(command);
@@ -120,58 +147,92 @@ int single_command(char *command) {
 
     char *args[100];
     split_args(command, args);
+
     pid_t pid = fork();
     if (pid == 0) {
         execvp(args[0], args);
         perror("실행 실패");
         exit(1);
-    } 
-    else {
-        int status;
-        waitpid(pid, &status, 0);
-        return WEXITSTATUS(status);  
+    } else {
+        if (!background) {
+            int status;
+            waitpid(pid, &status, 0);
+            return WEXITSTATUS(status);
+        } else {
+            printf("[백그라운드 실행] pid: %d\n", pid);
+            return 0;  
+        }
     }
 }
+
 
 
 void logical_command(char *logic) {
     char *curr = logic;
-    char *next;
+    int last = 0;         
     int run_next = 1;
-    int last = 0;
 
-    while (curr != NULL && *curr != '\0') {
-        if ((next = strstr(curr, "&&")) != NULL) {
+    while (*curr != '\0') {
+        char *next_and = strstr(curr, "&&");
+        char *next_or  = strstr(curr, "||");
+        char *next_semi = strchr(curr, ';');
+
+        char *next = NULL;
+        int type = 0;
+
+        if (next_and && (!next || next_and < next)) {
+            next = next_and;
+            type = 1;
+        }
+
+        if (next_or && (!next || next_or < next)) {
+            next = next_or;
+            type = 2;
+        }
+
+        if (next_semi && (!next || next_semi < next)) {
+            next = next_semi;
+            type = 3;
+        }
+
+        char *segment = curr;
+        if (next != NULL) {
             *next = '\0';
-            next += 2;
-            run_next = (last == 0);
-        } 
-        else if ((next = strstr(curr, "||")) != NULL) {
-            *next = '\0';
-            next += 2;
-            run_next = (last != 0);
-        } 
-        else if ((next = strchr(curr, ';')) != NULL) {
-            *next = '\0';
-            next += 1;
-            run_next = 1;
+        }
+
+        segment = remove_whitespace(segment);
+
+        if (run_next && strlen(segment) > 0) {
+            last = single_command(segment);
+        }
+
+        // 다음 실행 조건 설정
+        if (next != NULL) {
+            if (type == 1) {
+                run_next = (last == 0);
+            }
+            else if (type == 2) {
+                run_next = (last != 0);   
+            } 
+            else {
+                run_next = 1;             
+            }
+            curr = next + (type == 3 ? 1 : 2);  
         } 
         else {
-            next = NULL;
+            break;
         }
-
-        char *processed_command = remove_whitespace(curr);
-        if (run_next && strlen(processed_command) > 0) {
-            last = single_command(processed_command);
-        }
-
-        curr = next;
     }
 }
 
-int main() {
-    char command[100];
 
+
+
+int main() {
+    signal(SIGCHLD, background);
+
+    char command[100];
+    
     while (1) {
         char cwd[100];
         getcwd(cwd, sizeof(cwd));
