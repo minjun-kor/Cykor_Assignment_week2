@@ -2,48 +2,18 @@
 #include <stdlib.h>
 #include <string.h>
 #include <unistd.h>
-#include <limits.h>
 #include <sys/wait.h>
 #include <signal.h>
 #include <errno.h>
 
-void background(int check) {
-    int saved_errno = errno;
-    pid_t pid;
-    int status;
-
-    while ((pid = waitpid(-1, &status, WNOHANG)) > 0) {
-        printf("[백그라운드 종료] pid: %d\n", pid);
-        fflush(stdout);
-    }
-
-    errno = saved_errno;
-}
-
-char *remove_whitespace(char *str) {
-    while (*str == ' ' || *str == '\t' || *str == '\n') {
-        str++;
-    }
-
-    char *end = str + strlen(str) - 1;
-
-    while (end > str && (*end == ' ' || *end == '\t' || *end == '\n')) {
-        *end = '\0';
-        end--;
-    }
-    return str;
-}
-
-void split_args(char *input, char **args) {
-    int i = 0;
-    char *token = strtok(input, " ");
-
-    while (token != NULL && i < 99) {
-        args[i++] = remove_whitespace(token);
-        token = strtok(NULL, " ");
-    }
-    args[i] = NULL;
-}
+int cd(char* path);
+int pwd();
+void multi_pipe(char *command);
+char *remove_whitespace(char *str);
+void logical_command(char *logic);
+void background(int check);
+int single_command(char *command);
+void split_args(char *input, char **args);
 
 int cd(char* path) {
     path += 3;
@@ -120,52 +90,19 @@ void multi_pipe(char *command) {
     }
 }
 
-int single_command(char *command) {
-    command = remove_whitespace(command);
-
-    int background = 0;
-    size_t len = strlen(command);
-    if (len > 0 && command[len - 1] == '&') {
-        background = 1;
-        command[len - 1] = '\0';  
-        command = remove_whitespace(command);
+char *remove_whitespace(char *str) {
+    while (*str == ' ' || *str == '\t' || *str == '\n') {
+        str++;
     }
 
-    if (strcmp(command, "exit") == 0) {
-        exit(0);
-    }
-    if (strncmp(command, "cd ", 3) == 0) {
-        return cd(command);
-    }
-    if (strcmp(command, "pwd") == 0) {
-        return pwd();
-    }
-    if (strchr(command, '|')) {
-        multi_pipe(command);
-        return 0;
-    }
+    char *end = str + strlen(str) - 1;
 
-    char *args[100];
-    split_args(command, args);
-
-    pid_t pid = fork();
-    if (pid == 0) {
-        execvp(args[0], args);
-        perror("실행 실패");
-        exit(1);
-    } else {
-        if (!background) {
-            int status;
-            waitpid(pid, &status, 0);
-            return WEXITSTATUS(status);
-        } else {
-            printf("[백그라운드 실행] pid: %d\n", pid);
-            return 0;  
-        }
+    while (end > str && (*end == ' ' || *end == '\t' || *end == '\n')) {
+        *end = '\0';
+        end--;
     }
+    return str;
 }
-
-
 
 void logical_command(char *logic) {
     char *curr = logic;
@@ -206,7 +143,6 @@ void logical_command(char *logic) {
             last = single_command(segment);
         }
 
-        // 다음 실행 조건 설정
         if (next != NULL) {
             if (type == 1) {
                 run_next = (last == 0);
@@ -225,8 +161,76 @@ void logical_command(char *logic) {
     }
 }
 
+void background(int check) {
+    int saved_errno = errno;
+    pid_t pid;
+    int status;
 
+    while ((pid = waitpid(-1, &status, WNOHANG)) > 0) {
+        printf("[백그라운드 종료] pid: %d\n", pid);
+        fflush(stdout);
+    }
 
+    errno = saved_errno;
+}
+
+void split_args(char *input, char **args) {
+    int i = 0;
+    char *token = strtok(input, " ");
+
+    while (token != NULL && i < 99) {
+        args[i++] = remove_whitespace(token);
+        token = strtok(NULL, " ");
+    }
+    args[i] = NULL;
+}
+
+int single_command(char *command) {
+    command = remove_whitespace(command);
+
+    int background = 0;
+    size_t len = strlen(command);
+    if (len > 0 && command[len - 1] == '&') {
+        background = 1;
+        command[len - 1] = '\0';  
+        command = remove_whitespace(command);
+    }
+
+    if (strcmp(command, "exit") == 0) {
+        exit(0);
+    }
+    if (strncmp(command, "cd ", 3) == 0) {
+        return cd(command);
+    }
+    if (strcmp(command, "pwd") == 0) {
+        return pwd();
+    }
+    if (strchr(command, '|')) {
+        multi_pipe(command);
+        return 0;
+    }
+
+    char *args[100];
+    split_args(command, args);
+
+    pid_t pid = fork();
+    if (pid == 0) {
+        execvp(args[0], args);
+        perror("실행 실패");
+        exit(1);
+    } 
+    else {
+        if (!background) {
+            int status;
+            waitpid(pid, &status, 0);
+            return WEXITSTATUS(status);
+        } 
+        else {
+            printf("[백그라운드 실행] pid: %d\n", pid);
+            return 0;  
+        }
+    }
+}
 
 int main() {
     signal(SIGCHLD, background);
