@@ -242,7 +242,7 @@ int main() {
     while (1) {
         char cwd[100];
         getcwd(cwd, sizeof(cwd));
-        printf("%s$ ", cwd);
+        printf("[minjun_9@BOOK-4ULMSOMPT6:%s]$ ", cwd);
         fflush(stdout);
 
         if (!fgets(command, sizeof(command), stdin)) {
