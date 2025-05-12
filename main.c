@@ -15,6 +15,7 @@ void background(int check);
 int single_command(char *command);
 void split_args(char *input, char **args);
 
+
 int cd(char* path) {
     path += 3;
     path = remove_whitespace(path);
@@ -30,7 +31,8 @@ int pwd() {
     if (getcwd(cwd, sizeof(cwd))) {
         printf("%s\n", cwd);
         return 0;
-    } else {
+    } 
+    else {
         perror("pwd 오류");
         return 1;
     }
@@ -105,14 +107,14 @@ char *remove_whitespace(char *str) {
 }
 
 void logical_command(char *logic) {
-    char *curr = logic;
+    char *now = logic;
     int last = 0;         
     int run_next = 1;
 
-    while (*curr != '\0') {
-        char *next_and = strstr(curr, "&&");
-        char *next_or  = strstr(curr, "||");
-        char *next_semi = strchr(curr, ';');
+    while (*now != '\0') {
+        char *next_and = strstr(now, "&&");
+        char *next_or  = strstr(now, "||");
+        char *next_semi = strchr(now, ';');
 
         char *next = NULL;
         int type = 0;
@@ -132,7 +134,7 @@ void logical_command(char *logic) {
             type = 3;
         }
 
-        char *segment = curr;
+        char *segment = now;
         if (next != NULL) {
             *next = '\0';
         }
@@ -153,7 +155,7 @@ void logical_command(char *logic) {
             else {
                 run_next = 1;             
             }
-            curr = next + (type == 3 ? 1 : 2);  
+            now = next + (type == 3 ? 1 : 2);  
         } 
         else {
             break;
